@@ -732,7 +732,7 @@ class ADXIndicator(IndicatorMixin):
                 [
                     self._high - self._low,
                     np.abs(self._high - close_shift),
-                    self._low - close_shift,
+                    np.abs(self._low - close_shift),
                 ],
                 axis=1,
             )
