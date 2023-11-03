@@ -30,7 +30,8 @@ from ta.trend import (
 
 class TestADXIndicator(unittest.TestCase):
     """
-    https://school.stockcharts.com/doku.php?id=technical_indicators:average_directional_index_adx
+    TODO: Add different windows to smooth (tr, +DM, -DM) and adx like on TradingView.
+    https://ru.tradingview.com/support/solutions/43000589099/
     """
 
     _filename = "test/data/cs-adx.csv"
@@ -38,57 +39,110 @@ class TestADXIndicator(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._df = pd.read_csv(cls._filename, sep=",")
-        cls._params = {
+        cls._default_params = {
             "high": cls._df["High"],
             "low": cls._df["Low"],
             "close": cls._df["Close"],
             "window": 14,
+            "method" : "rma",
             "fillna": False,
         }
-        cls._indicator = ADXIndicator(**cls._params)
+        cls._sma_params = {
+            "high": cls._df["High"],
+            "low": cls._df["Low"],
+            "close": cls._df["Close"],
+            "window": 14,
+            "method" : "sma",
+            "fillna": False,
+        }
+
+        cls._default_indicator = ADXIndicator(**cls._default_params)
+        cls._sma_indicator = ADXIndicator(**cls._sma_params)
 
     @classmethod
     def tearDownClass(cls):
         del cls._df
 
     def test_adx(self):
-        target = "ADX"
-        result = adx(**self._params)
+        target = "adx"
+        result = adx(**self._default_params)
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )
 
     def test_adx2(self):
-        target = "ADX"
-        result = self._indicator.adx()
+        target = "adx"
+        result = self._default_indicator.adx()
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )
 
     def test_adx_pos(self):
-        target = "+DI14"
-        result = adx_pos(**self._params)
+        target = "adx_pos"
+        result = adx_pos(**self._default_params)
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )
 
     def test_adx_pos2(self):
-        target = "+DI14"
-        result = self._indicator.adx_pos()
+        target = "adx_pos"
+        result = self._default_indicator.adx_pos()
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )
 
     def test_adx_neg(self):
-        target = "-DI14"
-        result = adx_neg(**self._params)
+        target = "adx_neg"
+        result = adx_neg(**self._default_params)
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )
 
     def test_adx_neg2(self):
-        target = "-DI14"
-        result = self._indicator.adx_neg()
+        target = "adx_neg"
+        result = self._default_indicator.adx_neg()
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+    #!SMA test---------------------
+    def test_adx(self):
+        target = "sma_adx"
+        result = adx(**self._sma_params)
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+
+    def test_adx2(self):
+        target = "sma_adx"
+        result = self._sma_indicator.adx()
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+
+    def test_adx_pos(self):
+        target = "sma_adx_pos"
+        result = adx_pos(**self._sma_params)
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+
+    def test_adx_pos2(self):
+        target = "sma_adx_pos"
+        result = self._sma_indicator.adx_pos()
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+
+    def test_adx_neg(self):
+        target = "sma_adx_neg"
+        result = adx_neg(**self._sma_params)
+        pd.testing.assert_series_equal(
+            self._df[target].tail(), result.tail(), check_names=False
+        )
+
+    def test_adx_neg2(self):
+        target = "sma_adx_neg"
+        result = self._sma_indicator.adx_neg()
         pd.testing.assert_series_equal(
             self._df[target].tail(), result.tail(), check_names=False
         )

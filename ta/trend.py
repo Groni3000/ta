@@ -690,13 +690,16 @@ class ADXIndicator(IndicatorMixin):
     Using these three indicators together, chartists can determine both the
     direction and strength of the trend.
 
-    http://stockcharts.com/school/doku.php?id=chart_school:technical_indicators:average_directional_index_adx
+    https://ru.tradingview.com/support/solutions/43000589099/
+
+    You can find the code if you plot the indicator.
 
     Args:
         high(pandas.Series): dataset 'High' column.
         low(pandas.Series): dataset 'Low' column.
         close(pandas.Series): dataset 'Close' column.
         window(int): n period.
+        method(str): method to smooth tr and moves, default is "rma",
         fillna(bool): if True, fill nan values.
     """
 
@@ -706,66 +709,80 @@ class ADXIndicator(IndicatorMixin):
         low: pd.Series,
         close: pd.Series,
         window: int = 14,
+        method: str = "sma",
         fillna: bool = False,
     ):
         self._high = high
         self._low = low
         self._close = close
+        if window <= 0:
+            raise ValueError("window should be positive")
         self._window = window
+        if method in ["sma", "rma"]:
+            self._method = method
+        else:
+            raise NotImplementedError(f"You want unimplemented method {method}")
         self._fillna = fillna
         self._run()
 
     def _run(self):
-        if self._window == 0:
-            raise ValueError("window may not be 0")
-
         close_shift = self._close.shift(1)
+        self._tr = (
+            pd.concat(
+                [
+                    self._high - self._low,
+                    np.abs(self._high - close_shift),
+                    self._low - close_shift,
+                ],
+                axis=1,
+            )
+            .max(axis=1)
+            .rename("tr")
+        )
+        up_move = self._high - self._high.shift()
+        down_move = self._low.shift() - self._low
+        up_move[~((up_move > down_move) & (up_move > 0))] = 0
+        down_move[~((down_move > up_move) & (down_move > 0))] = 0
 
-        pdm = _get_min_max(self._high, close_shift, "max")
-        pdn = _get_min_max(self._low, close_shift, "min")
-
-        diff_directional_movement = pdm - pdn
-
-        self._trs_initial = np.zeros(self._window - 1)
-        self._trs = np.zeros(len(self._close) - (self._window - 1))
-        self._trs[0] = diff_directional_movement.dropna().iloc[0 : self._window].sum()
-        diff_directional_movement = diff_directional_movement.reset_index(drop=True)
-
-        for i in range(1, len(self._trs) - 1):
-            self._trs[i] = (
-                self._trs[i - 1]
-                - (self._trs[i - 1] / float(self._window))
-                + diff_directional_movement[self._window + i]
+        if self._method == "sma":
+            self._atr = self._tr.rolling(self._window).mean().rename("atr")
+            smoothed_dmp = up_move.rolling(self._window).mean()
+            smoothed_dmm = down_move.rolling(self._window).mean()
+        elif self._method == "rma":
+            self._atr = (
+                self._tr.ewm(
+                    alpha=1 / self._window, min_periods=self._window, adjust=False
+                )
+                .mean()
+                .rename("atr")
+            )
+            smoothed_dmp = up_move.ewm(
+                alpha=1 / self._window, min_periods=self._window, adjust=False
+            ).mean()
+            smoothed_dmm = down_move.ewm(
+                alpha=1 / self._window, min_periods=self._window, adjust=False
+            ).mean()
+        else:
+            raise NotImplementedError(
+                "Coders didn't add implementation to calculations ;)"
             )
 
-        diff_up = self._high - self._high.shift(1)
-        diff_down = self._low.shift(1) - self._low
+        self._plus_di = 100 * (smoothed_dmp / self._atr).rename("adx_pos")
+        self._minus_di = 100 * (smoothed_dmm / self._atr).rename("adx_neg")
 
-        pos = abs(((diff_up > diff_down) & (diff_up > 0)) * diff_up)
-        neg = abs(((diff_down > diff_up) & (diff_down > 0)) * diff_down)
-
-        self._dip = np.zeros(len(self._close) - (self._window - 1))
-        self._dip[0] = pos.dropna().iloc[0 : self._window].sum()
-
-        pos = pos.reset_index(drop=True)
-
-        for i in range(1, len(self._dip) - 1):
-            self._dip[i] = (
-                self._dip[i - 1]
-                - (self._dip[i - 1] / float(self._window))
-                + pos[self._window + i]
-            )
-
-        self._din = np.zeros(len(self._close) - (self._window - 1))
-        self._din[0] = neg.dropna().iloc[0 : self._window].sum()
-
-        neg = neg.reset_index(drop=True)
-
-        for i in range(1, len(self._din) - 1):
-            self._din[i] = (
-                self._din[i - 1]
-                - (self._din[i - 1] / float(self._window))
-                + neg[self._window + i]
+        if self._method == "sma":
+            self._adx = 100 * (
+                np.abs(self._plus_di - self._minus_di)
+                / (self._plus_di + self._minus_di)
+            ).rolling(self._window).mean().rename("adx")
+        elif self._method == "rma":
+            self._adx = 100 * (
+                np.abs(self._plus_di - self._minus_di)
+                / (self._plus_di + self._minus_di)
+            ).ewm(
+                alpha=1 / self._window, min_periods=self._window, adjust=False
+            ).mean().rename(
+                "adx"
             )
 
     def adx(self) -> pd.Series:
@@ -774,48 +791,7 @@ class ADXIndicator(IndicatorMixin):
         Returns:
             pandas.Series: New feature generated.tr
         """
-        dip = np.zeros(len(self._trs))
-
-        for idx, value in enumerate(self._trs):
-            if value != 0:
-                dip[idx] = 100 * (self._dip[idx] / value)
-
-            else:
-                dip[idx] = 0
-
-        din = np.zeros(len(self._trs))
-
-        for idx, value in enumerate(self._trs):
-            if value != 0:
-                din[idx] = 100 * (self._din[idx] / value)
-
-            else:
-                din[idx] = 0
-
-        directional_index = np.zeros(len(self._trs))
-
-        for idx in range(len(self._trs)):
-            if dip[idx] + din[idx] != 0:
-                directional_index[idx] = 100 * np.abs(
-                    (dip[idx] - din[idx]) / (dip[idx] + din[idx])
-                )
-
-            else:
-                directional_index[idx] = 0
-
-        adx_series = np.zeros(len(self._trs))
-        adx_series[self._window] = directional_index[0 : self._window].mean()
-
-        for i in range(self._window + 1, len(adx_series)):
-            adx_series[i] = (
-                (adx_series[i - 1] * (self._window - 1)) + directional_index[i - 1]
-            ) / float(self._window)
-
-        adx_series = np.concatenate((self._trs_initial, adx_series), axis=0)
-        adx_series = pd.Series(data=adx_series, index=self._close.index)
-        adx_series = self._check_fillna(adx_series, value=20)
-
-        return pd.Series(adx_series, name="adx")
+        return pd.Series(self._adx, name="adx")
 
     def adx_pos(self) -> pd.Series:
         """Plus Directional Indicator (+DI)
@@ -823,20 +799,8 @@ class ADXIndicator(IndicatorMixin):
         Returns:
             pandas.Series: New feature generated.
         """
-        dip = np.zeros(len(self._close))
 
-        for i in range(1, len(self._trs) - 1):
-            if self._trs[i] != 0:
-                dip[i + self._window] = 100 * (self._dip[i] / self._trs[i])
-
-            else:
-                dip[i + self._window] = 0
-
-        adx_pos_series = self._check_fillna(
-            pd.Series(dip, index=self._close.index), value=20
-        )
-
-        return pd.Series(adx_pos_series, name="adx_pos")
+        return pd.Series(self._plus_di, name="adx_pos")
 
     def adx_neg(self) -> pd.Series:
         """Minus Directional Indicator (-DI)
@@ -844,20 +808,8 @@ class ADXIndicator(IndicatorMixin):
         Returns:
             pandas.Series: New feature generated.
         """
-        din = np.zeros(len(self._close))
 
-        for i in range(1, len(self._trs) - 1):
-            if self._trs[i] != 0:
-                din[i + self._window] = 100 * (self._din[i] / self._trs[i])
-
-            else:
-                din[i + self._window] = 0
-
-        adx_neg_series = self._check_fillna(
-            pd.Series(din, index=self._close.index), value=20
-        )
-
-        return pd.Series(adx_neg_series, name="adx_neg")
+        return pd.Series(self._minus_di, name="adx_neg")
 
 
 class VortexIndicator(IndicatorMixin):
@@ -1261,7 +1213,7 @@ def macd_diff(close, window_slow=26, window_fast=12, window_sign=9, fillna=False
     ).macd_diff()
 
 
-def adx(high, low, close, window=14, fillna=False):
+def adx(high, low, close, window=14, method="rma", fillna=False):
     """Average Directional Movement Index (ADX)
 
     The Plus Directional Indicator (+DI) and Minus Directional Indicator (-DI)
@@ -1283,17 +1235,18 @@ def adx(high, low, close, window=14, fillna=False):
         low(pandas.Series): dataset 'Low' column.
         close(pandas.Series): dataset 'Close' column.
         window(int): n period.
+        method(str): method to smooth tr and moves, default is "rma",
         fillna(bool): if True, fill nan values.
 
     Returns:
         pandas.Series: New feature generated.
     """
     return ADXIndicator(
-        high=high, low=low, close=close, window=window, fillna=fillna
+        high=high, low=low, close=close, window=window, method=method, fillna=fillna
     ).adx()
 
 
-def adx_pos(high, low, close, window=14, fillna=False):
+def adx_pos(high, low, close, window=14, method="rma", fillna=False):
     """Average Directional Movement Index Positive (ADX)
 
     The Plus Directional Indicator (+DI) and Minus Directional Indicator (-DI)
@@ -1315,17 +1268,18 @@ def adx_pos(high, low, close, window=14, fillna=False):
         low(pandas.Series): dataset 'Low' column.
         close(pandas.Series): dataset 'Close' column.
         window(int): n period.
+        method(str): method to smooth tr and moves, default is "rma",
         fillna(bool): if True, fill nan values.
 
     Returns:
         pandas.Series: New feature generated.
     """
     return ADXIndicator(
-        high=high, low=low, close=close, window=window, fillna=fillna
+        high=high, low=low, close=close, window=window, method=method, fillna=fillna
     ).adx_pos()
 
 
-def adx_neg(high, low, close, window=14, fillna=False):
+def adx_neg(high, low, close, window=14, method="rma", fillna=False):
     """Average Directional Movement Index Negative (ADX)
 
     The Plus Directional Indicator (+DI) and Minus Directional Indicator (-DI)
@@ -1347,13 +1301,14 @@ def adx_neg(high, low, close, window=14, fillna=False):
         low(pandas.Series): dataset 'Low' column.
         close(pandas.Series): dataset 'Close' column.
         window(int): n period.
+        method(str): method to smooth tr and moves, default is "rma",
         fillna(bool): if True, fill nan values.
 
     Returns:
         pandas.Series: New feature generated.
     """
     return ADXIndicator(
-        high=high, low=low, close=close, window=window, fillna=fillna
+        high=high, low=low, close=close, window=window, method=method, fillna=fillna
     ).adx_neg()
 
 
